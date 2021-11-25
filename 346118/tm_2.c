@@ -36,32 +36,43 @@
 **/
 
 
-typedef struct wordList_t* wordList_t;
-typedef struct word_t word_t;
+typedef struct wordNode_instance_t* wordNode_t;
 
-struct word_t
+// Linked list of words!
+struct wordNode_instance_t
 {
-    bool valid_a; // Which copy is "valid" from the previous epoch, true for A false for B
-    bool currently_accessed; // true if no other transaction is currently accessing it, false otherwise
-    bool writing; // wheter the word has been written in the current epoch
+    // CONTROL!
+    // Which copy is "valid" from the previous epoch!  true --> A  |  false --> B
+    bool valid_a; 
+    // true if at least one other transactions is in the access set, false otherwise
+    // access set: a set of transactions that are currently accessing this word!
+    bool accessed;
+    // wheter the word is currently being written to  
+    bool writing;
+    // If is non-free-able allocated segment
+    bool non_free_able;
+
+    // COPY!
     void* copy_A;
     void* copy_B;
+
+    // wordNode_t is a pointer to another wordNode_instance_t
+    wordNode_t next_word; 
 };
 
-// Lined list of word's, giving us a memory list!
-struct wordList_t
-{
-    word_t* word;
-    wordList_t* next_word;
-};
-
-// @param word_ptr is a pointer to a word instance that will be added to this "Node"
-
-
+/** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
+ * @param size  Size of the first shared segment of memory to allocate (in bytes), must be a positive multiple of the alignment
+ * @param align Alignment (in bytes, must be a power of 2) that the shared memory region must support
+ * @return Opaque shared memory region handle, 'invalid_shared' on failure
+**/
 shared_t tm_create(size_t unused(size), size_t unused(align)) {
     // TODO: tm_create(size_t, size_t)
+    
+    // Check if size is not 0, because then it acn still pass the test in the second else if
+    if (size-align < 0)
+        return invalid_shared;
     //  Checks if the size is a positive multiple of align
-    if(size%align != 0)
+    else if(size%align != 0)
         return invalid_shared;
     // Checks if the size is a power of 2
     else if(align%2 != 0)
@@ -69,34 +80,49 @@ shared_t tm_create(size_t unused(size), size_t unused(align)) {
     
     size_t numb_words = (size_t) size/align;
 
-    // First word
-    wordList_t inst = calloc(1, sizeof(struct wordList_t));
-    (*inst) ->word = calloc(1, sizeof(struct word_t));
-    (*inst) ->next_word = NULL;
-    ((*inst) ->word) ->copy_A = calloc(1, align);
-    ((*inst) ->word) ->copy_B = calloc(1, align);
-    ((*inst) ->word) ->currently_accessed = false;
-    ((*inst) ->word) ->valid_a = NULL;
-    ((*inst) ->word) ->writing = false;
+    wordNode_t init = calloc(1, sizeof(struct wordNode_instance_t));
+    init -> copy_A = calloc(1, align);
+    init -> copy_B = calloc(1, align);
+    
+    
+    if(init == NULL) printf("Could not allocate memory!");exit(-1);
+    if((init -> copy_A) == NULL) printf("Could not allocate memory!");exit(-1);
+    if((init -> copy_B) == NULL) printf("Could not allocate memory!");exit(-1);
 
-    wordList_t* current_head = inst;
+    init -> accessed = false;
+    init -> valid_a = NULL; // Neither copy A or copy B is currently valid!
+    init -> writing = false;
+    init -> next_word = NULL; // Init to NULL, so it does not point to random place
+    init -> non_free_able = true; // This word is part of the non-free-able allocated segment
 
-    for(int i = 0; i<numb_words-1; i++)
+    wordNode_t tmp_head = init;
+    // If there size is a positive multiple of align
+    // that is bigger than 1, we will need to create more word nodes
+    for(int i = 0; i <(numb_words-1); i++)
     {
-        (*current_head) ->next_word = calloc(1, sizeof(struct wordList_t));
-        current_head = ((*current_head) ->next_word);
+        wordNode_t new_word = calloc(1, sizeof(struct wordNode_instance_t));
+        if(new_word == NULL) printf("Could not allocate memory!");exit(-1);
+        
 
-        (*current_head) ->word = calloc(1, sizeof(struct word_t));
-        (*current_head) ->next_word = NULL;
-        ((*current_head) ->word) ->copy_A = calloc(1, align);
-        ((*current_head) ->word) ->copy_B = calloc(1, align);
-        ((*current_head) ->word) ->currently_accessed = false;
-        ((*current_head) ->word) ->valid_a = NULL;
-        ((*current_head) ->word) ->writing = false;
+        tmp_head ->next_word = new_word;
+        tmp_head = new_word;
+
+        tmp_head -> copy_A = calloc(1, align); 
+        tmp_head -> copy_B = calloc(1, align);
+        
+        //Checking if allocation of memory was successfull
+        if((tmp_head -> copy_A) == NULL) printf("Could not allocate memory!");exit(-1);
+        if((tmp_head -> copy_B) == NULL) printf("Could not allocate memory!");exit(-1);
+
+        tmp_head -> accessed = false;
+        tmp_head -> valid_a = NULL; // Neither copy A or copy B is currently valid!
+        tmp_head -> writing = false;
+        tmp_head -> next_word = NULL; // Init to NULL, so it does not point to random place
+        tmp_head -> non_free_able = true; // This word is part of the non-free-able allocated segment
+
     }
 
-    return inst;
-
+    return init;
 }
 
 /** Destroy (i.e. clean-up + free) a given shared memory region.
@@ -105,19 +131,17 @@ shared_t tm_create(size_t unused(size), size_t unused(align)) {
 void tm_destroy(shared_t unused(shared)) {
     // TODO: tm_destroy(shared_t)
     
-    wordList_t* tmp;
-    wordList_t* head = (wordList_t*) shared;
+    wordNode_t head = shared;
+    wordNode_t tmp;
     
     // Will need to iterate over all next words, to free up their memory
     while(head != NULL)
     {
-        // Pointer to temporary and pointer to current head
-        tmp = head;
-        head = (*head) -> next_word;
-        free(((*tmp) -> word) ->copy_A);
-        free(((*tmp) -> word) ->copy_B);
-        free((*tmp) -> word);
-        free(tmp);    
+        tmp = head -> next_word;
+        free(head ->copy_A);
+        free(head ->copy_B);
+        free(head);
+        head = tmp;
     }
 }
 
@@ -127,7 +151,7 @@ void tm_destroy(shared_t unused(shared)) {
 **/
 void* tm_start(shared_t unused(shared)) {
     // TODO: tm_start(shared_t)
-    return (*((wordList_t*) shared)) -> word;
+    return ((wordNode_t) shared);
 }
 
 /** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.
@@ -135,7 +159,9 @@ void* tm_start(shared_t unused(shared)) {
  * @return First allocated segment size
 **/
 size_t tm_size(shared_t unused(shared)) {
-    return sizeof((*((wordList_t*) shared)) -> word);
+    size_t size = 0;
+
+
 }
 
 /** [thread-safe] Return the alignment (in bytes) of the memory accesses on the given shared memory region.
@@ -143,7 +169,7 @@ size_t tm_size(shared_t unused(shared)) {
  * @return Alignment used globally
 **/
 size_t tm_align(shared_t unused(shared)) {
-    return sizeof((*((wordList_t*)shared))->word->copy_A);
+    return sizeof( ((wordNode_t) shared) ->copy_A );
 }
 
 /** [thread-safe] Begin a new transaction on the given shared memory region.
@@ -167,7 +193,7 @@ bool tm_end(shared_t unused(shared), tx_t unused(tx)) {
 }
 
 
-void read_a_or_b(word_t* word_ptr, void* unused(target))
+void read_a_or_b(wordNode_t word_ptr, void* unused(target))
 {
     if(word_ptr ->valid_a)
     {
@@ -181,7 +207,7 @@ void read_a_or_b(word_t* word_ptr, void* unused(target))
 }
 
 
-bool read_word(word_t* word_ptr, void* unused(target))
+bool read_word(wordNode_t word_ptr, void* unused(target))
 {   
     // Transaction is read-only, since no process is currently writing to this very word
     if(!word_ptr ->writing)
@@ -195,7 +221,7 @@ bool read_word(word_t* word_ptr, void* unused(target))
         if(word_ptr ->writing)
         {   
             // Is not currently beeing accessed, i.e. the person is done writing, and have updated the writable copy
-            if(!word_ptr->currently_accessed)
+            if(!word_ptr->accessed)
             {   
                 // Will read the writable copy into target, this will be the opposite of valid_a
                 if(word_ptr ->valid_a) 
@@ -207,7 +233,7 @@ bool read_word(word_t* word_ptr, void* unused(target))
                 // The transaction can continue
                 return true; 
             }
-            // The person writing is not done writing, can't take the channce on actually figuring out
+            // The person writing is not done writing, can't take the chance on actually figuring out
             // if we should read from the readable copy or the writeable copy.
             else
             {
@@ -219,8 +245,8 @@ bool read_word(word_t* word_ptr, void* unused(target))
         {
             read_a_or_b(word_ptr, target);
             // To be sure we just check that currently accessed is set to false!
-            if(word_ptr -> currently_accessed) 
-                word_ptr -> currently_accessed = false;
+            if(word_ptr -> accessed) 
+                word_ptr -> accessed = false;
             return true;
         }
     }
@@ -236,22 +262,7 @@ bool read_word(word_t* word_ptr, void* unused(target))
  * @return Whether the whole transaction can continue
 **/
 bool tm_read(shared_t unused(shared), tx_t unused(tx), void const* unused(source), size_t unused(size), void* unused(target)) {
-    // TODO: tm_read(shared_t, tx_t, void const*, size_t, void*)
-    wordList_t* memory_ptr = (wordList_t*) shared;
-    int iterations = size / tm_align(memory_ptr);
-    word_t* tmp_ptr = (word_t*) source;
-
-    // source: 0x0000
-    // size:   0x030
-    // align:  0x005
-    // for(int i = 0; i<size//align; i++)
-    //      address = source + i*align
-    // output: 0x000 -> 0x005 -> 0x010 -> 0x015 -> 0x020 -> 0x025 | Total 30//5 = 6 different memory places
-
-    //for(int i = 0; i<iterations; i++)
-    //{
-        //read_word(tmp_ptr+1);
-    //}
+    
 
 
     return false;
@@ -296,3 +307,4 @@ bool tm_free(shared_t unused(shared), tx_t unused(tx), void* unused(target)) {
     // TODO: tm_free(shared_t, tx_t, void*)
     return false;
 }
+
