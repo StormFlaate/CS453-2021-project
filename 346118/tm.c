@@ -262,9 +262,10 @@ bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* unused(sourc
     // TODO: tm_write(shared_t, tx_t, void const*, size_t, void*)
     
     printf("tm_write...\n");
-    struct region* region = (struct region*) shared;
 
     wordNode_t head = (wordNode_t) target;
+    
+    printf("Size of size var: %zu\n", size);
     
     bool result = write_word(source, head, size);
     
