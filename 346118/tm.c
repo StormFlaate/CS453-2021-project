@@ -60,28 +60,23 @@ struct wordNode_instance_t
     // true if at least one other transactions is in the access set, false otherwise
     // access set: a set of transactions that are currently accessing this word!
     bool accessed;
+    bool free; // Mark target for deregistration, if true it will be removed when last transaction is done
+    bool writing; // wheter the word is currently being written to  
 
-    // Mark target for deregistration, if true it will be removed when last transaction is done
-    bool free;
-
-    // wheter the word is currently being written to  
-    bool writing;
-
-    // COPY!
     void* copy_A;
     void* copy_B;
 
-    // wordNode_t is a pointer to another wordNode_instance_t
     wordNode_t next_word; 
     wordNode_t prev_word;
 };
 
 struct region {
     //struct share_lock_t lock;
-    void* start; // start of the shared memory region
+    wordNode_t start; // start of the shared memory region
     
     size_t align; // Size of word in the shared memory region (bytes)
     size_t size; // Size of non-deallocable memory segment (bytes)
+    size_t control_size; // Size of control part of wordNode_t (bytes)
     wordNode_t allocs;
 
     /* LOCK */
@@ -102,15 +97,32 @@ shared_t tm_create(size_t size, size_t align) {
     // Checks if the size is a power of 2
     else if(align%2 != 0)
         return invalid_shared;
-    
+
+
+    size_t align_alloc_size = align < sizeof(void *) ? sizeof(void *) : align;
+
     struct region* region = (struct region*) calloc(1, sizeof(struct region));
     if(region == NULL) { printf("Could not allocate memory!\n"); return invalid_shared; }
 
-    if(posix_memalign(&(region -> start), align, size) != 0){
+    wordNode_t start_node = (wordNode_t) calloc(1, sizeof(struct wordNode_instance_t));
+    if(start_node == NULL) { printf("Could not allocate memory!\n"); return invalid_shared; }
+
+    size_t control_size = sizeof(start_node->accessed) 
+        + sizeof(start_node->writing) 
+        + sizeof(start_node->free)
+        + sizeof(start_node->valid_a)
+        + sizeof(start_node->next_word)*2;
+
+
+    start_node ->accessed = false;
+    start_node ->free = false;
+    start_node ->writing = false;
+    start_node ->valid_a = true;
+    
+    if (posix_memalign(&(region->start), align, 2*size + control_size) != 0) {
         free(region);
         return invalid_shared;
     }
-
 
     /* LOCK */
     if (!shared_lock_init(&(region->lock))) {
@@ -120,11 +132,10 @@ shared_t tm_create(size_t size, size_t align) {
     }
     /* LOCK */
 
-
-
-    memset(region -> start, 0, size);
+    region -> start = start_node;
     region -> align = align;
     region -> size = size;
+    region -> control_size = control_size;
     region -> allocs = NULL; // No initial value for memory segments
     
     return region;
@@ -544,4 +555,62 @@ bool tm_free(shared_t unused(shared), tx_t unused(tx), void* unused(target)) {
     
     ((wordNode_t) target ) -> free = true;
     return true;
+}
+
+
+int main()
+{
+
+    printf("Now we are running.....\n");
+    
+    // Input number of nodes:
+    size_t c = 5;
+
+    shared_t head = tm_create(4*c,4);
+
+    size_t align_size = tm_align(head);
+    size_t full_size = tm_size(head);
+
+
+    // Write from private source into shared memory
+    void* source_1 = malloc(sizeof(int)*3);
+    
+    
+    *((int*)source_1) = 1;
+    *((int*)(source_1)+1) = 10;
+    *((int*)(source_1)+2) = 100;
+    
+    // printf("%d\n",*(int*)(source_1) );
+    // printf("%d\n", *((int*)(source_1)+1) );
+    // printf("%d\n", *((int*)(source_1)+2) );
+
+    
+    tm_write(head, 222, source_1, 4*3, head);
+
+    ((wordNode_t) head)->accessed = false;
+    ((wordNode_t) head)->writing = false;
+    ((wordNode_t) head)->next_word->accessed = false;
+    ((wordNode_t) head)->next_word->writing = false;
+    ((wordNode_t) head)->next_word->next_word->accessed = false;
+    ((wordNode_t) head)->next_word->next_word->writing = false;
+    
+    void *private_memory = malloc(sizeof(int)*3);
+    // Init both private memory spots to 999, so we can see if they have updated!
+
+    *((int*)private_memory) = 999;
+    *((int*)(private_memory)+1) = 999;
+    *((int*)(private_memory)+2) = 999;
+    printf("\n----------------------\n\n");
+    printf("%d | %d | %d - initial values on private memory, should change\n\n", *(int*)private_memory, *( ((int*)(private_memory)) +1), *( ( (int*)(private_memory) ) + 2));
+    tm_read(head, 123, head, 4*3, private_memory);
+    printf("%d | %d | %d - if these values appear below, program works\n", 1, 10 ,100);
+    printf("%d | %d | %d\n", *(int*)private_memory, *( ( (int*)(private_memory) ) + 1), *( ( (int*)(private_memory) ) + 2));
+    
+    
+
+    
+    printf("Code executed with success!\n");
+
+
+    return 0;
 }
