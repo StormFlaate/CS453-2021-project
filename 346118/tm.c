@@ -111,6 +111,7 @@ shared_t tm_create(size_t size, size_t align) {
 }
 
 void tm_destroy(shared_t shared) {
+    printf("tm_destroy...\n");
     // Note: To be compatible with any implementation, shared_t is defined as a
     // void*. For this particular implementation, the "real" type of a shared_t
     // is a struct region*.
@@ -137,18 +138,22 @@ void tm_destroy(shared_t shared) {
 // You can assume sizeof(void*) == 64b and that the maximum size ever allocated
 // will be 2^48.
 void* tm_start(shared_t shared) {
+    printf("tm_start...\n");
     return ((struct region*) shared)->start;
 }
 
 size_t tm_size(shared_t shared) {
+    printf("tm_size...\n");
     return ((struct region*) shared)->size;
 }
 
 size_t tm_align(shared_t shared) {
+    printf("tm_align...\n");
     return ((struct region*) shared)->align;
 }
 
 tx_t tm_begin(shared_t shared, bool is_ro) {
+    printf("tm_begin...\n");
     // We let read-only transactions run in parallel by acquiring a shared
     // access. On the other hand, read-write transactions acquire an exclusive
     // access. At any point in time, the lock can be shared between any number
@@ -170,6 +175,7 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
 }
 
 bool tm_end(shared_t shared, tx_t tx) {
+    printf("tm_end...\n");
     if (tx == read_only_tx) {
         shared_lock_release_shared(&(((struct region*) shared)->lock));
     } else {
@@ -180,11 +186,13 @@ bool tm_end(shared_t shared, tx_t tx) {
 
 // Note: "unused" is a macro that tells the compiler that a variable is unused.
 bool tm_read(shared_t unused(shared), tx_t unused(tx), void const* source, size_t size, void* target) {
+    printf("tm_read...\n");
     memcpy(target, source, size);
     return true;
 }
 
 bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* source, size_t size, void* target) {
+    printf("tm_write...\n");
     memcpy(target, source, size);
     return true;
 }
