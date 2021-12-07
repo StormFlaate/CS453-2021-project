@@ -95,9 +95,9 @@ shared_t tm_create(size_t size, size_t align) {
         return invalid_shared;
     }
 
-    printf("Adress of start: %p", &region->start);
-    printf("Adress of copy_A: %p", &region->start->copy_A);
-    printf("Adress of copy_B: %p", &region->start->copy_B);
+    // printf("Adress of start: %p", &region->start);
+    // printf("Adress of copy_A: %p", &region->start->copy_A);
+    // printf("Adress of copy_B: %p", &region->start->copy_B);
 
     if (!shared_lock_init(&(region->lock))) {
         free(region->start);
