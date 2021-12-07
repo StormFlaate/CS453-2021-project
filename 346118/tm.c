@@ -76,7 +76,6 @@ struct region {
     
     size_t align; // Size of word in the shared memory region (bytes)
     size_t size; // Size of non-deallocable memory segment (bytes)
-    size_t control_size; // Size of control part of wordNode_t (bytes)
     wordNode_t allocs;
 
     /* LOCK */
@@ -99,30 +98,24 @@ shared_t tm_create(size_t size, size_t align) {
         return invalid_shared;
 
 
-    size_t align_alloc_size = align < sizeof(void *) ? sizeof(void *) : align;
-
     struct region* region = (struct region*) calloc(1, sizeof(struct region));
-    if(region == NULL) { printf("Could not allocate memory!\n"); return invalid_shared; }
-
     wordNode_t start_node = (wordNode_t) calloc(1, sizeof(struct wordNode_instance_t));
-    if(start_node == NULL) { printf("Could not allocate memory!\n"); return invalid_shared; }
+    
+    if(region == NULL) return invalid_shared; 
+    if(start_node == NULL) return invalid_shared;
 
-    size_t control_size = sizeof(start_node->accessed) 
-        + sizeof(start_node->writing) 
-        + sizeof(start_node->free)
-        + sizeof(start_node->valid_a)
-        + sizeof(start_node->next_word)*2;
 
+    start_node ->copy_A = (void*) calloc(1, size);
+    start_node ->copy_B = (void*) calloc(1, size);
+    
+    if (start_node ->copy_A == NULL) return invalid_shared;
+    if (start_node ->copy_B == NULL) return invalid_shared;
 
     start_node ->accessed = false;
     start_node ->free = false;
     start_node ->writing = false;
     start_node ->valid_a = true;
     
-    if (posix_memalign(&(region->start), align, 2*size + control_size) != 0) {
-        free(region);
-        return invalid_shared;
-    }
 
     /* LOCK */
     if (!shared_lock_init(&(region->lock))) {
@@ -135,7 +128,6 @@ shared_t tm_create(size_t size, size_t align) {
     region -> start = start_node;
     region -> align = align;
     region -> size = size;
-    region -> control_size = control_size;
     region -> allocs = NULL; // No initial value for memory segments
     
     return region;
