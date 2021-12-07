@@ -29,7 +29,7 @@
 
 // Internal headers
 #include "../include/tm.h"
-#include "macros.h"
+#include "../reference/macros.h"
 
 /** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
  * @param size  Size of the first shared segment of memory to allocate (in bytes), must be a positive multiple of the alignment
