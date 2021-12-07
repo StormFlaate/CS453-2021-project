@@ -45,13 +45,23 @@
 static const tx_t read_only_tx  = UINTPTR_MAX - 10;
 static const tx_t read_write_tx = UINTPTR_MAX - 11;
 
-/**
- * @brief List of dynamically allocated segments.
- */
+
+// Linked list of words!
 struct wordNode_instance_t {
+    
+    /*LINKED SECTION*/
     struct wordNode_instance_t* prev;
     struct wordNode_instance_t* next;
-    // uint8_t segment[] // segment of dynamic size
+    
+    /* CONTROL SECTION */
+    bool valid_a; 
+    bool accessed;
+    bool free; 
+    bool writing; 
+
+    void* copy_A;
+    void* copy_B;
+
 };
 typedef struct wordNode_instance_t* wordNode_t;
 
