@@ -80,8 +80,8 @@ shared_t tm_create(size_t size, size_t align) {
     printf("Working...1\n");
     wordNode_t start = (struct wordNode_instance_t*) calloc(1, sizeof(struct wordNode_instance_t));
 
-    //if (unlikely(!start)) return invalid_shared; // check for successfull memory allocation
-    //if (unlikely(!region)) return invalid_shared; // check for successfull memory allocation
+    if (unlikely(!start)) return invalid_shared; // check for successfull memory allocation
+    if (unlikely(!region)) return invalid_shared; // check for successfull memory allocation
         
     printf("Working...4\n");
     
@@ -109,8 +109,8 @@ shared_t tm_create(size_t size, size_t align) {
     // start node copies
     start->copy_A = (void*) calloc(1, size);
     start->copy_B = (void*) calloc(1, size);
-    //if (unlikely(!start->copy_A)) return invalid_shared; // check for successfull memory allocation
-    //if (unlikely(!start->copy_B)) return invalid_shared; // check for successfull memory allocation
+    if (unlikely(!start->copy_A)) return invalid_shared; // check for successfull memory allocation
+    if (unlikely(!start->copy_B)) return invalid_shared; // check for successfull memory allocation
     
     printf("Working...6\n");
 
@@ -119,6 +119,7 @@ shared_t tm_create(size_t size, size_t align) {
     region->size = size;
     region->align = align;
 
+    printf("Working...7\n");
     return region;
 }
 
