@@ -65,12 +65,10 @@ struct wordNode_instance_t {
 };
 typedef struct wordNode_instance_t* wordNode_t;
 
-/**
- * @brief Simple Shared Memory Region (a.k.a Transactional Memory).
- */
+
 struct region {
     struct shared_lock_t lock; // Global (coarse-grained) lock
-    void* start;        // Start of the shared memory region (i.e., of the non-deallocable memory segment)
+    wordNode_t start;        // Start of the shared memory region (i.e., of the non-deallocable memory segment)
     wordNode_t allocs; // Shared memory segments dynamically allocated via tm_alloc within transactions
     size_t size;        // Size of the non-deallocable memory segment (in bytes)
     size_t align;       // Size of a word in the shared memory region (in bytes)
@@ -82,10 +80,7 @@ shared_t tm_create(size_t size, size_t align) {
     wordNode_t start = (wordNode_t) calloc(1, sizeof(struct wordNode_instance_t*));
     if (unlikely(!start)) return invalid_shared; // check for successfull memory allocation
     
-    start ->accessed = false;
-    start ->free = false;
-    start ->writing = false;
-    start ->valid_a = true;
+    
 
 
 
@@ -94,21 +89,30 @@ shared_t tm_create(size_t size, size_t align) {
     }
     // We allocate the shared memory buffer such that its words are correctly
     // aligned.
-    if (posix_memalign(&(region->start), align, size + sizeof(struct wordNode_instance_t)) != 0) {
+    if (posix_memalign(&(region->start), align, 2*size + sizeof(struct wordNode_instance_t)) != 0) {
         free(region);
         return invalid_shared;
     }
+
+    printf("Adress of start: %p", &region->start);
+
     if (!shared_lock_init(&(region->lock))) {
         free(region->start);
         free(region);
         return invalid_shared;
     }
 
+    // start node
+    start ->accessed = false;
+    start ->free = false;
+    start ->writing = false;
+    start ->valid_a = true;
 
-    memset(region->start, 0, size);
+    // region
     region->allocs      = NULL;
     region->size        = size;
     region->align       = align;
+
     return region;
 }
 
