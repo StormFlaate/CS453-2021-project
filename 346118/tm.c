@@ -77,18 +77,12 @@ struct region {
 
 shared_t tm_create(size_t size, size_t align) {
     struct region* region = (struct region*) malloc(sizeof(struct region));
-    printf("Working...1\n");
     wordNode_t start = (struct wordNode_instance_t*) calloc(1, sizeof(struct wordNode_instance_t));
 
     if (unlikely(!start)) return invalid_shared; // check for successfull memory allocation
     if (unlikely(!region)) return invalid_shared; // check for successfull memory allocation
         
-    printf("Working...4\n");
     
-    
-    
-
-    printf("Working...5\n");
 
     
     
@@ -99,7 +93,6 @@ shared_t tm_create(size_t size, size_t align) {
         return invalid_shared;
     }
 
-    printf("Working...5\n");
 
     // start node
     start->accessed = false;
@@ -112,14 +105,12 @@ shared_t tm_create(size_t size, size_t align) {
     if (unlikely(!start->copy_A)) return invalid_shared; // check for successfull memory allocation
     if (unlikely(!start->copy_B)) return invalid_shared; // check for successfull memory allocation
     
-    printf("Working...6\n");
 
     // region
     region->allocs = NULL;
     region->size = size;
     region->align = align;
 
-    printf("Working...7\n");
     return region;
 }
 
@@ -208,10 +199,17 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     // be satisfied. Thus, we use align on max(align, struct wordNode_t*).
     size_t align = ((struct region*) shared)->align;
     align = align < sizeof(struct wordNode_t*) ? sizeof(void*) : align;
+    
+    printf("Working...1\n");
 
     struct wordNode_instance_t* sn;
+
+    printf("Working...2\n");
+
     if (unlikely(posix_memalign((void**)&sn, align, sizeof(struct wordNode_instance_t) + size) != 0)) // Allocation failed
         return nomem_alloc;
+
+    printf("Working...3\n");
 
     // Insert in the linked list
     sn->prev = NULL;
@@ -219,9 +217,13 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     if (sn->next) sn->next->prev = sn;
     ((struct region*) shared)->allocs = sn;
 
+    printf("Working...4\n");
+
     void* segment = (void*) ((uintptr_t) sn + sizeof(struct wordNode_instance_t));
     memset(segment, 0, size);
     *target = segment;
+
+    printf("Working...5\n");
     return success_alloc;
 }
 
