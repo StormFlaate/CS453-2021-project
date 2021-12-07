@@ -78,6 +78,17 @@ struct region {
 
 shared_t tm_create(size_t size, size_t align) {
     struct region* region = (struct region*) malloc(sizeof(struct region));
+
+    wordNode_t start = (wordNode_t) calloc(1, sizeof(struct wordNode_instance_t*));
+    if (unlikely(!start)) return invalid_shared; // check for successfull memory allocation
+    
+    start ->accessed = false;
+    start ->free = false;
+    start ->writing = false;
+    start ->valid_a = true;
+
+
+
     if (unlikely(!region)) {
         return invalid_shared;
     }
@@ -92,6 +103,8 @@ shared_t tm_create(size_t size, size_t align) {
         free(region);
         return invalid_shared;
     }
+
+
     memset(region->start, 0, size);
     region->allocs      = NULL;
     region->size        = size;
