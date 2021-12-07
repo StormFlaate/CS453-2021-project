@@ -31,7 +31,7 @@
 #include <string.h>
 
 // Internal headers
-#include "include/tm.h"
+#include "../include/tm.h"
 
 #include "macros.h"
 #include "shared-lock.h"
