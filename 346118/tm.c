@@ -193,8 +193,36 @@ bool tm_read(shared_t unused(shared), tx_t unused(tx), void const* source, size_
 
 
 
+void write_a_or_b(const void* unused(source), wordNode_t word_ptr, size_t size)
+{
 
-bool write_word(const void* unused(source), wordNode_t word_ptr)
+    // If copy_A is currently valid, that means we have to write into B
+    // This way people can still read from copy_A until we are done with copy_B
+    if(word_ptr ->valid_a)
+    {
+
+        // Copies bytes from source + offset, since we are currently on the k-th time copying from source
+        // Copies this into destination of copy_B, this is passed on from a for loop in the other function, so we don't need to keep track of this offset
+        memcpy(word_ptr->copy_B, source, size);
+
+        // Updates valid_a variable when we are done writing to the shared area, we now know it is updated
+        word_ptr ->valid_a = false;
+    }
+    // If copy_B is currently valid, that means we have to write into A
+    // This way people can still read form Ccopy_B until we are done with copy_A
+    else
+    {
+
+        // Copies bytes from source + offset, since we are currently on the k-th time copying from source
+        // Copies this into destination of copy_B, this is passed on from a for loop in the other function, so we don't need to keep track of this offset
+        memcpy(word_ptr->copy_A, source, size);
+        // Updates valid_a variable when we are done writing to the shared area, we now know it is updated
+        word_ptr ->valid_a = true;
+    }
+}
+
+
+bool write_word(const void* unused(source), wordNode_t word_ptr, size_t size)
 {
     // If a word has been written in the current epoch, i.e. if someone is currently writing
     if(word_ptr ->writing)
@@ -213,7 +241,7 @@ bool write_word(const void* unused(source), wordNode_t word_ptr)
         }
         else
         {
-            write_a_or_b(source, word_ptr, offset_mult, align);
+            write_a_or_b(source, word_ptr, size);
             if(word_ptr -> accessed) 
                 word_ptr -> accessed = true;
             word_ptr ->writing = true;
@@ -232,33 +260,15 @@ bool write_word(const void* unused(source), wordNode_t word_ptr)
 **/
 bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* unused(source), size_t unused(size), void* unused(target)) {
     // TODO: tm_write(shared_t, tx_t, void const*, size_t, void*)
-    printf("tm_write...\n");
     
+    printf("tm_write...\n");
     struct region* region = (struct region*) shared;
-    size_t align = tm_align(shared);
-    size_t align_chunks = size/align; // if size = 64 bytes and align = 8 bytes, we will count 8 align chunks
 
     wordNode_t head = (wordNode_t) target;
-    wordNode_t tmp;
-
-    while(head != NULL)
-    {
-        tmp = head -> next;
-        // Target + counter*align gives us adress chunk for private memory!
-        
-        
-        bool result = write_word(source, head);
-        // If one word write fails, we will need to abort the whole transaction!
-        if (!result)
-        {
-            return false;
-        }
-
-        head = tmp;
-
-
-    // If we get down here there was not enough words in our shared memory to satisfy the tm_read, we therefore abort!
-    return false;
+    
+    bool result = write_word(source, head, size);
+    
+    return result;
 }
 
 
