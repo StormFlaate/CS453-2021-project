@@ -176,7 +176,7 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     align = align < sizeof(struct wordNode_t*) ? sizeof(void*) : align;
 
     struct wordNode_instance_t* sn;
-    if (unlikely(posix_memalign((void**)&sn, align, sizeof(struct ) + size) != 0)) // Allocation failed
+    if (unlikely(posix_memalign((void**)&sn, align, sizeof(struct wordNode_instance_t) + size) != 0)) // Allocation failed
         return nomem_alloc;
 
     // Insert in the linked list
