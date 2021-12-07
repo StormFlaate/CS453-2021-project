@@ -89,8 +89,8 @@ shared_t tm_create(size_t size, size_t align) {
         return invalid_shared;
     }
     // We allocate the shared memory buffer such that its words are correctly
-    // aligned.
-    if (posix_memalign((void**)&(region->start), align, 2*size  != 0) {
+    // aligned. + sizeof(struct wordNode_instance_t)
+    if (posix_memalign((void**)&(region->start), align, 2*size ) != 0) {
         free(region);
         return invalid_shared;
     }
