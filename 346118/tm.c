@@ -81,7 +81,7 @@ shared_t tm_create(size_t size, size_t align) {
     wordNode_t start = (struct wordNode_instance_t*) calloc(1, sizeof(struct wordNode_instance_t));
     printf("Working...2\n");
     if (unlikely(!start)) return invalid_shared; // check for successfull memory allocation
-    
+    printf("Working...3\n");
     
 
 
@@ -89,12 +89,14 @@ shared_t tm_create(size_t size, size_t align) {
     if (unlikely(!region)) {
         return invalid_shared;
     }
+    printf("Working...4\n");
     // We allocate the shared memory buffer such that its words are correctly
     // aligned.
     if (posix_memalign(&(region->start), align, 2*size) != 0) {
         free(region);
         return invalid_shared;
     }
+    printf("Working...5\n");
 
     printf("Adress of start: %p", region->start);
     printf("Adress of copy_A: %p", ((wordNode_t)region->start)->copy_A);
