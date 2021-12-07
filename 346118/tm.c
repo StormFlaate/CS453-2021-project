@@ -77,8 +77,9 @@ struct region {
 
 shared_t tm_create(size_t size, size_t align) {
     struct region* region = (struct region*) malloc(sizeof(struct region));
-    printf("Working...\n");
-    wordNode_t start = (wordNode_t) calloc(1, sizeof(struct wordNode_instance_t));
+    printf("Working...1\n");
+    wordNode_t start = (struct wordNode_instance_t*) calloc(1, sizeof(struct wordNode_instance_t));
+    printf("Working...2\n");
     if (unlikely(!start)) return invalid_shared; // check for successfull memory allocation
     
     
