@@ -69,7 +69,7 @@ typedef struct wordNode_instance_t* wordNode_t;
 
 struct region {
     struct shared_lock_t lock; // Global (coarse-grained) lock
-    void* start;        // Start of the shared memory region (i.e., of the non-deallocable memory segment)
+    wordNode_t start;        // Start of the shared memory region (i.e., of the non-deallocable memory segment)
     wordNode_t allocs; // Shared memory segments dynamically allocated via tm_alloc within transactions
     size_t size;        // Size of the non-deallocable memory segment (in bytes)
     size_t align;       // Size of a word in the shared memory region (in bytes)
@@ -79,28 +79,18 @@ shared_t tm_create(size_t size, size_t align) {
     struct region* region = (struct region*) malloc(sizeof(struct region));
     printf("Working...1\n");
     wordNode_t start = (struct wordNode_instance_t*) calloc(1, sizeof(struct wordNode_instance_t));
-    printf("Working...2\n");
+
     if (unlikely(!start)) return invalid_shared; // check for successfull memory allocation
-    printf("Working...3\n");
+    if (unlikely(!region)) return invalid_shared; // check for successfull memory allocation
+        
+    printf("Working...4\n");
+    
+    
     
 
-
-
-    if (unlikely(!region)) {
-        return invalid_shared;
-    }
-    printf("Working...4\n");
-    // We allocate the shared memory buffer such that its words are correctly
-    // aligned.
-    if (posix_memalign(&(region->start), align, size) != 0) {
-        free(region);
-        return invalid_shared;
-    }
     printf("Working...5\n");
 
     
-    printf("Adress of copy_A: %p", ((wordNode_t)region->start)->copy_A);
-    printf("Adress of copy_B: %p", ((wordNode_t)region->start)->copy_B);
     
 
     if (!shared_lock_init(&(region->lock))) {
@@ -109,11 +99,20 @@ shared_t tm_create(size_t size, size_t align) {
         return invalid_shared;
     }
 
+    printf("Working...5\n");
+
     // start node
-    start ->accessed = false;
-    start ->free = false;
-    start ->writing = false;
-    start ->valid_a = true;
+    start->accessed = false;
+    start->free = false;
+    start->writing = false;
+    start->valid_a = true;
+    // start node copies
+    start->copy_A = (void*) calloc(1, size);
+    start->copy_B = (void*) calloc(1, size);
+    if (unlikely(!start->copy_A)) return invalid_shared; // check for successfull memory allocation
+    if (unlikely(!start->copy_B)) return invalid_shared; // check for successfull memory allocation
+    
+    printf("Working...6\n");
 
     // region
     region->allocs      = NULL;
