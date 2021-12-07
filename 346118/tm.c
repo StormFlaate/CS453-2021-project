@@ -82,10 +82,6 @@ shared_t tm_create(size_t size, size_t align) {
     if (unlikely(!start)) return invalid_shared; // check for successfull memory allocation
     if (unlikely(!region)) return invalid_shared; // check for successfull memory allocation
         
-    
-
-    
-    
 
     if (!shared_lock_init(&(region->lock))) {
         free(region->start);
@@ -197,6 +193,8 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     // We allocate the dynamic segment such that its words are correctly
     // aligned. Moreover, the alignment of the 'next' and 'prev' pointers must
     // be satisfied. Thus, we use align on max(align, struct wordNode_t*).
+
+    printf("Working...1\n");
     size_t align = ((struct region*) shared)->align;
     align = align < sizeof(struct wordNode_t*) ? sizeof(void*) : align;
     
