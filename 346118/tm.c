@@ -92,7 +92,7 @@ shared_t tm_create(size_t size, size_t align) {
     printf("Working...4\n");
     // We allocate the shared memory buffer such that its words are correctly
     // aligned.
-    if (posix_memalign(&(region->start), align, 2*size) != 0) {
+    if (posix_memalign(&(region->start), align, size) != 0) {
         free(region);
         return invalid_shared;
     }
