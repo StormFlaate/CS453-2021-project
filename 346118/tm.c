@@ -191,11 +191,77 @@ bool tm_read(shared_t unused(shared), tx_t unused(tx), void const* source, size_
     return true;
 }
 
-bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* source, size_t size, void* target) {
-    printf("tm_write...\n");
-    memcpy(target, source, size);
-    return true;
+
+
+
+bool write_word(const void* unused(source), wordNode_t word_ptr)
+{
+    // If a word has been written in the current epoch, i.e. if someone is currently writing
+    if(word_ptr ->writing)
+    {   
+        // For later we can say that if anyone is current writing we just return false here,
+        // then we can optimize this later
+        // How to distinguish if a word is in the current access set or not given our current solution
+        return false;
+        
+    }
+    else
+    {
+        if(word_ptr ->accessed)
+        {
+            return false;
+        }
+        else
+        {
+            write_a_or_b(source, word_ptr, offset_mult, align);
+            if(word_ptr -> accessed) 
+                word_ptr -> accessed = true;
+            word_ptr ->writing = true;
+            return true;
+        }
+    }
 }
+
+/** [thread-safe] Write operation in the given transaction, source in a private region and target in the shared region.
+ * @param shared Shared memory region associated with the transaction
+ * @param tx     Transaction to use
+ * @param source Source start address (in a private region)
+ * @param size   Length to copy (in bytes), must be a positive multiple of the alignment
+ * @param target Target start address (in the shared region)
+ * @return Whether the whole transaction can continue
+**/
+bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* unused(source), size_t unused(size), void* unused(target)) {
+    // TODO: tm_write(shared_t, tx_t, void const*, size_t, void*)
+    printf("tm_write...\n");
+    
+    struct region* region = (struct region*) shared;
+    size_t align = tm_align(shared);
+    size_t align_chunks = size/align; // if size = 64 bytes and align = 8 bytes, we will count 8 align chunks
+
+    wordNode_t head = (wordNode_t) target;
+    wordNode_t tmp;
+
+    while(head != NULL)
+    {
+        tmp = head -> next;
+        // Target + counter*align gives us adress chunk for private memory!
+        
+        
+        bool result = write_word(source, head);
+        // If one word write fails, we will need to abort the whole transaction!
+        if (!result)
+        {
+            return false;
+        }
+
+        head = tmp;
+
+
+    // If we get down here there was not enough words in our shared memory to satisfy the tm_read, we therefore abort!
+    return false;
+}
+
+
 
 alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     // We allocate the dynamic segment such that its words are correctly
