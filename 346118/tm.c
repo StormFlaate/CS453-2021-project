@@ -69,7 +69,7 @@ typedef struct wordNode_instance_t* wordNode_t;
 
 struct region {
     struct shared_lock_t lock; // Global (coarse-grained) lock
-    wordNode_t start;        // Start of the shared memory region (i.e., of the non-deallocable memory segment)
+    void* start;        // Start of the shared memory region (i.e., of the non-deallocable memory segment)
     wordNode_t allocs; // Shared memory segments dynamically allocated via tm_alloc within transactions
     size_t size;        // Size of the non-deallocable memory segment (in bytes)
     size_t align;       // Size of a word in the shared memory region (in bytes)
@@ -78,7 +78,7 @@ struct region {
 shared_t tm_create(size_t size, size_t align) {
     struct region* region = (struct region*) malloc(sizeof(struct region));
 
-    wordNode_t start = (wordNode_t) calloc(1, sizeof(struct wordNode_instance_t));
+    wordNode_t start = (wordNode_t) calloc(1, sizeof(struct wordNode_instance_t*));
     if (unlikely(!start)) return invalid_shared; // check for successfull memory allocation
     
     
@@ -89,15 +89,16 @@ shared_t tm_create(size_t size, size_t align) {
         return invalid_shared;
     }
     // We allocate the shared memory buffer such that its words are correctly
-    // aligned. + sizeof(struct wordNode_instance_t)
-    if (posix_memalign((void**)&(region->start), align, 2*size ) != 0) {
+    // aligned.
+    if (posix_memalign(&(region->start), align, 2*size + sizeof(struct wordNode_instance_t)) != 0) {
         free(region);
         return invalid_shared;
     }
 
-    // printf("Adress of start: %p", &region->start);
-    // printf("Adress of copy_A: %p", &region->start->copy_A);
-    // printf("Adress of copy_B: %p", &region->start->copy_B);
+    printf("Adress of start: %p", region->start);
+    printf("Adress of copy_A: %p", ((wordNode_t)region->start)->copy_A);
+    printf("Adress of copy_B: %p", ((wordNode_t)region->start)->copy_B);
+    
 
     if (!shared_lock_init(&(region->lock))) {
         free(region->start);
