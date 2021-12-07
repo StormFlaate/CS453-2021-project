@@ -42,6 +42,10 @@
 // 3. How are we suppose to handle when we update which value is valid or not -> i.e. valid_a or valid_b
 
 
+#include "shared-lock.h"
+
+static const tx_t read_only_tx  = UINTPTR_MAX - 10;
+static const tx_t read_write_tx = UINTPTR_MAX - 11;
 
 
 typedef struct wordNode_instance_t* wordNode_t;
@@ -62,11 +66,6 @@ struct wordNode_instance_t
 
     // wheter the word is currently being written to  
     bool writing;
-    // If is non-free-able allocated segment
-    bool non_free_able;
-
-    // Size of align
-    size_t align_size;
 
     // COPY!
     void* copy_A;
@@ -80,18 +79,20 @@ struct wordNode_instance_t
 struct region {
     //struct share_lock_t lock;
     void* start; // start of the shared memory region
+    
+    size_t align; // Size of word in the shared memory region (bytes)
+    size_t size; // Size of non-deallocable memory segment (bytes)
+    wordNode_t allocs;
 
+    /* LOCK */
+    struct shared_lock_t lock;
+    /* LOCK */
 };
 
 
-/** Create (i.e. allocate + init) a new shared memory region, with one first non-free-able allocated segment of the requested size and alignment.
- * @param size  Size of the first shared segment of memory to allocate (in bytes), must be a positive multiple of the alignment
- * @param align Alignment (in bytes, must be a power of 2) that the shared memory region must support
- * @return Opaque shared memory region handle, 'invalid_shared' on failure
-**/
-shared_t tm_create(size_t unused(size), size_t unused(align)) {
-    // TODO: tm_create(size_t, size_t)
-    
+
+shared_t tm_create(size_t size, size_t align) {
+
     // Check if size is not 0, because then it acn still pass the test in the second else if
     if (size-align < 0)
         return invalid_shared;
@@ -102,175 +103,150 @@ shared_t tm_create(size_t unused(size), size_t unused(align)) {
     else if(align%2 != 0)
         return invalid_shared;
     
-    size_t numb_words = (size_t) size/align;
+    struct region* region = (struct region*) calloc(1, sizeof(struct region));
+    if(region == NULL) { printf("Could not allocate memory!\n"); return invalid_shared; }
 
-    wordNode_t init = calloc(1, sizeof(struct wordNode_instance_t));
-    init -> copy_A = calloc(1, align);
-    init -> copy_B = calloc(1, align);
-    
-    
-    if(init == NULL) { printf("Could not allocate memory!\n"); return invalid_shared; }
-    if((init -> copy_A) == NULL) { printf("Could not allocate memory!\n"); return invalid_shared; }
-    if((init -> copy_B) == NULL)  {printf("Could not allocate memory!\n"); return invalid_shared; }
-
-    init -> accessed = false;
-    init -> free = false;
-    init -> valid_a = true; // Setting default to that copy_A is valid
-    init -> writing = false;
-    init -> next_word = NULL; // Init to NULL, so it does not point to random place
-    init -> non_free_able = true; // This word is part of the non-free-able allocated segment
-    init -> align_size = align; // This is so we have the align size with us all the time
-    init -> prev_word = NULL; // Since this is head we set the previous word to NULL
-
-
-
-    wordNode_t tmp_head = init;
-    wordNode_t tmp_prev = tmp_head;
-    // If there size is a positive multiple of align
-    // that is bigger than 1, we will need to create more word nodes
-    for(size_t i = 0; i <(numb_words-1); i++)
-    {
-        wordNode_t new_word = calloc(1, sizeof(struct wordNode_instance_t));
-        if(new_word == NULL) { printf("Could not allocate memory!"); return invalid_shared; }
-        
-
-        tmp_head ->next_word = new_word;
-        tmp_prev = tmp_head;
-        tmp_head = new_word;
-
-        tmp_head -> copy_A = calloc(1, align); 
-        tmp_head -> copy_B = calloc(1, align);
-        
-        //Checking if allocation of memory was successfull
-        if((tmp_head -> copy_A) == NULL) { printf("Could not allocate memory!\n"); return invalid_shared; }
-        if((tmp_head -> copy_B) == NULL) { printf("Could not allocate memory!\n"); return invalid_shared; }
-
-        tmp_head -> accessed = false;
-        tmp_head -> free = false;
-        tmp_head -> valid_a = true; // Setting default to that copy_A is valid
-        tmp_head -> writing = false;
-        tmp_head -> next_word = NULL; // Init to NULL, so it does not point to random place
-        tmp_head -> non_free_able = true; // This word is part of the non-free-able allocated segment
-        tmp_head -> align_size = align; // This is so we have the align size with us all the time
-        tmp_head -> prev_word = tmp_prev;
-
-        
-
+    if(posix_memalign(&(region -> start), align, size) != 0){
+        free(region);
+        return invalid_shared;
     }
-    return init;
+
+
+    /* LOCK */
+    if (!shared_lock_init(&(region->lock))) {
+        free(region->start);
+        free(region);
+        return invalid_shared;
+    }
+    /* LOCK */
+
+
+
+    memset(region -> start, 0, size);
+    region -> align = align;
+    region -> size = size;
+    region -> allocs = NULL; // No initial value for memory segments
+    
+    return region;
 }
+
 
 /** Destroy (i.e. clean-up + free) a given shared memory region.
  * @param shared Shared memory region to destroy, with no running transaction
 **/
-void tm_destroy(shared_t unused(shared)) {
+void tm_destroy(shared_t shared) {
     // TODO: tm_destroy(shared_t)
+
+
+    struct region* region = (struct region*) shared;
     
-    wordNode_t head = shared;
+    // Defining head as the first allocated segment in the region
+    wordNode_t head = region -> allocs;
     wordNode_t tmp;
-    
-    // Will need to iterate over all next words, to free up their memory
-    while(head != NULL)
-    {
+
+    // Iterating over all the nodes in the lined list
+    while (head != NULL) { 
         tmp = head -> next_word;
-        free(head ->copy_A);
-        free(head ->copy_B);
+        free(head -> copy_A);
+        free(head -> copy_B);
         free(head);
         head = tmp;
     }
+    free(region -> start);
+
+    /* LOCK */
+    shared_lock_cleanup(&(region->lock));
+    /* LOCK */
+
+    free(region);
 }
+
 
 /** [thread-safe] Return the start address of the first allocated segment in the shared memory region.
  * @param shared Shared memory region to query
  * @return Start address of the first allocated segment
 **/
-void* tm_start(shared_t unused(shared)) {
-    // TODO: tm_start(shared_t)
-
-    // Possible that I shuold implement a pointer back to the first node in the shared memory
-    // so that every node points back to the main node.
-    // Keep this in mind, and take a executive decision on this later
-    return ((wordNode_t) shared);
+void* tm_start(shared_t shared) {
+    return ((struct region*) shared)->start;
 }
 
 /** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.
  * @param shared Shared memory region to query
  * @return First allocated segment size
 **/
-size_t tm_size(shared_t unused(shared)) {
-    size_t size = 0;
-
-    wordNode_t head = shared;
-    wordNode_t tmp;
-
-    // If the non-free-able mark is set to false, we no longer have the first allocated segment of the shared memory
-    // If the head is equal to NULL, we have no more words on the current word node linked list
-    while(head != NULL && (head->non_free_able) == true)
-    {
-        tmp = head -> next_word;
-        size += tm_align(head);
-        head = tmp;
-    }
-
-    return size;
+size_t tm_size(shared_t shared) {
+    return ((struct region*) shared)->size;
 }
 
 /** [thread-safe] Return the alignment (in bytes) of the memory accesses on the given shared memory region.
  * @param shared Shared memory region to query
  * @return Alignment used globally
 **/
-size_t tm_align(shared_t unused(shared)) {
-    return  ((wordNode_t) shared) ->align_size;
+size_t tm_align(shared_t shared) {
+    return ((struct region*) shared)->align;
 }
 
-/** [thread-safe] Begin a new transaction on the given shared memory region.
- * @param shared Shared memory region to start a transaction on
- * @param is_ro  Whether the transaction is read-only
- * @return Opaque transaction ID, 'invalid_tx' on failure
-**/
-tx_t tm_begin(shared_t unused(shared), bool unused(is_ro)) {
-    // TODO: tm_begin(shared_t)
-    return invalid_tx;
+tx_t tm_begin(shared_t shared, bool is_ro) {
+    // We let read-only transactions run in parallel by acquiring a shared
+    // access. On the other hand, read-write transactions acquire an exclusive
+    // access. At any point in time, the lock can be shared between any number
+    // of read-only transactions or held by a single read-write transaction.
+    if (is_ro) {
+        // Note: "unlikely" is a macro that helps branch prediction.
+        // It tells the compiler (GCC) that the condition is unlikely to be true
+        // and to optimize the code with this additional knowledge.
+        // It of course penalizes executions in which the condition turns up to
+        // be true.
+        if (unlikely(!shared_lock_acquire_shared(&(((struct region*) shared)->lock))))
+            return invalid_tx;
+        return read_only_tx;
+    } else {
+        if (unlikely(!shared_lock_acquire(&(((struct region*) shared)->lock))))
+            return invalid_tx;
+        return read_write_tx;
+    }
 }
 
-/** [thread-safe] End the given transaction.
- * @param shared Shared memory region associated with the transaction
- * @param tx     Transaction to end
- * @return Whether the whole transaction committed
-**/
-bool tm_end(shared_t unused(shared), tx_t unused(tx)) {
-    // TODO: tm_end(shared_t, tx_t)
-    return false;
+bool tm_end(shared_t shared, tx_t tx) {
+    if (tx == read_only_tx) {
+        shared_lock_release_shared(&(((struct region*) shared)->lock));
+    } else {
+        shared_lock_release(&(((struct region*) shared)->lock));
+    }
+    return true;
 }
 
 
-void read_a_or_b(wordNode_t word_ptr, void* unused(target), size_t offset_mult)
+
+
+
+void read_a_or_b(wordNode_t word_ptr, void* unused(target), size_t offset_mult, size_t align)
 {   
     if(word_ptr ->valid_a)
     {
         
-        // Copies bytes to destination of target + (offset_mult * word_ptr)
+        // Copies bytes to destination of target + offset
         // Copy align number of bytes into the target (destination) + offset
-        size_t offset = offset_mult*word_ptr->align_size;
-        memcpy(target+offset, word_ptr->copy_A, word_ptr->align_size);
+        size_t offset = offset_mult*align;
+        memcpy(target+offset, word_ptr->copy_A, align);
     }
     else
     {
         // Copies bytes to destination of target + (offset_mult * word_ptr)
         // Copy align number of bytes into the target (destination) + offset
-        size_t offset = offset_mult*word_ptr->align_size;
-        memcpy(target+offset, word_ptr->copy_B, word_ptr->align_size);
+        size_t offset = offset_mult*align;
+        memcpy(target+offset, word_ptr->copy_B, align);
     }
 }
 
 
-bool read_word(wordNode_t word_ptr, void* unused(target), size_t offset_mult)
+bool read_word(wordNode_t word_ptr, void* unused(target), size_t offset_mult, size_t align)
 {   
     
     // Transaction is read-only, since no process is currently writing to this very word
     if(!word_ptr ->writing)
     {
-        read_a_or_b(word_ptr, target, offset_mult);
+        read_a_or_b(word_ptr, target, offset_mult, align);
         return true;
     }
     else
@@ -301,7 +277,7 @@ bool read_word(wordNode_t word_ptr, void* unused(target), size_t offset_mult)
         // The person is currently done with writing, it is therefore now a read-only!
         else
         {
-            read_a_or_b(word_ptr, target, offset_mult);
+            read_a_or_b(word_ptr, target, offset_mult, align);
             // To be sure we just check that currently accessed is set to false!
             if(word_ptr -> accessed) 
                 word_ptr -> accessed = false;
@@ -309,7 +285,6 @@ bool read_word(wordNode_t word_ptr, void* unused(target), size_t offset_mult)
         }
     }
 }
-
 
 /** [thread-safe] Read operation in the given transaction, source in the shared region and target in a private region.
  * @param shared Shared memory region associated with the transaction
@@ -319,11 +294,15 @@ bool read_word(wordNode_t word_ptr, void* unused(target), size_t offset_mult)
  * @param target Target start address (in a private region)
  * @return Whether the whole transaction can continue
 **/
-bool tm_read(shared_t unused(shared), tx_t unused(tx), void const* unused(source), size_t unused(size), void* unused(target)) {
+bool tm_read(shared_t unused(shared), tx_t unused(tx), void const* source, size_t size, void* target) {
     
-    size_t align_chunks = size/tm_align(shared); // if size = 64 bytes and align = 8 bytes, we will count 8 align chunks
+    
+    size_t align = tm_align(shared);
+    size_t align_chunks = size/align; // if size = 64 bytes and align = 8 bytes, we will count 8 align chunks
+    
 
-
+    struct region* region = (struct region*) shared;
+    
     wordNode_t head = (wordNode_t) source;
     wordNode_t tmp;
     size_t counter = 0;
@@ -334,7 +313,7 @@ bool tm_read(shared_t unused(shared), tx_t unused(tx), void const* unused(source
         tmp = head -> next_word;
         // Target + counter gives us adress chunk for private memory!
         
-        bool result = read_word(head, target, counter); 
+        bool result = read_word(head, target, counter, align); 
 
         // If one word read fails, we will need to abort the whole transaction!
         if (!result)
@@ -356,10 +335,10 @@ bool tm_read(shared_t unused(shared), tx_t unused(tx), void const* unused(source
 
 
 
-void write_a_or_b(const void* unused(source), wordNode_t word_ptr, size_t offset_mult)
-{
 
-    
+
+void write_a_or_b(const void* unused(source), wordNode_t word_ptr, size_t offset_mult, size_t align)
+{
 
     // If copy_A is currently valid, that means we have to write into B
     // This way people can still read from copy_A until we are done with copy_B
@@ -368,8 +347,8 @@ void write_a_or_b(const void* unused(source), wordNode_t word_ptr, size_t offset
 
         // Copies bytes from source + offset, since we are currently on the k-th time copying from source
         // Copies this into destination of copy_B, this is passed on from a for loop in the other function, so we don't need to keep track of this offset
-        size_t offset = offset_mult*(word_ptr->align_size);
-        memcpy(word_ptr->copy_B, source+offset, word_ptr->align_size);
+        size_t offset = offset_mult*align;
+        memcpy(word_ptr->copy_B, source+offset, align);
 
         // Updates valid_a variable when we are done writing to the shared area, we now know it is updated
         word_ptr ->valid_a = false;
@@ -381,15 +360,15 @@ void write_a_or_b(const void* unused(source), wordNode_t word_ptr, size_t offset
 
         // Copies bytes from source + offset, since we are currently on the k-th time copying from source
         // Copies this into destination of copy_B, this is passed on from a for loop in the other function, so we don't need to keep track of this offset
-        size_t offset = offset_mult*word_ptr->align_size;
-        memcpy(word_ptr->copy_A, source+offset, word_ptr->align_size);
+        size_t offset = offset_mult*align;
+        memcpy(word_ptr->copy_A, source+offset, align);
         // Updates valid_a variable when we are done writing to the shared area, we now know it is updated
         word_ptr ->valid_a = true;
     }
 }
 
 
-bool write_word(const void* unused(source), wordNode_t word_ptr, size_t offset_mult)
+bool write_word(const void* unused(source), wordNode_t word_ptr, size_t offset_mult, size_t align)
 {
     // If a word has been written in the current epoch, i.e. if someone is currently writing
     if(word_ptr ->writing)
@@ -408,7 +387,7 @@ bool write_word(const void* unused(source), wordNode_t word_ptr, size_t offset_m
         }
         else
         {
-            write_a_or_b(source, word_ptr, offset_mult);
+            write_a_or_b(source, word_ptr, offset_mult, align);
             if(word_ptr -> accessed) 
                 word_ptr -> accessed = true;
             word_ptr ->writing = true;
@@ -427,7 +406,11 @@ bool write_word(const void* unused(source), wordNode_t word_ptr, size_t offset_m
 **/
 bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* unused(source), size_t unused(size), void* unused(target)) {
     // TODO: tm_write(shared_t, tx_t, void const*, size_t, void*)
-    size_t align_chunks = size/tm_align(shared); // if size = 64 bytes and align = 8 bytes, we will count 8 align chunks
+    
+    
+    struct region* region = (struct region*) shared;
+    size_t align = tm_align(shared);
+    size_t align_chunks = size/align; // if size = 64 bytes and align = 8 bytes, we will count 8 align chunks
 
     wordNode_t head = (wordNode_t) target;
     wordNode_t tmp;
@@ -440,7 +423,7 @@ bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* unused(sourc
         // Target + counter*align gives us adress chunk for private memory!
         
         
-        bool result = write_word(source, head, counter);
+        bool result = write_word(source, head, counter, align);
         // If one word write fails, we will need to abort the whole transaction!
         if (!result)
         {
@@ -458,169 +441,3 @@ bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* unused(sourc
     // If we get down here there was not enough words in our shared memory to satisfy the tm_read, we therefore abort!
     return false;
 }
-
-
-
-/** [thread-safe] Memory allocation in the given transaction.
- * @param shared Shared memory region associated with the transaction
- * @param tx     Transaction to use
- * @param size   Allocation requested size (in bytes), must be a positive multiple of the alignment
- * @param target Pointer in private memory receiving the address of the first byte of the newly allocated, aligned segment
- * @return Whether the whole transaction can continue (success/nomem), or not (abort_alloc)
-**/
-alloc_t tm_alloc(shared_t unused(shared), tx_t unused(tx), size_t unused(size), void** unused(target)) {
-    // TODO: tm_alloc(shared_t, tx_t, size_t, void**)
-    // Check if size is not 0, because then it acn still pass the test in the second else if
-    size_t align = tm_align(shared);
-    
-    if (size-align < 0)
-        return abort_alloc;
-    //  Checks if the size is a positive multiple of align
-    else if(size%align != 0)
-        return abort_alloc;
-    // Checks if the size is a power of 2
-    else if(align%2 != 0)
-        return abort_alloc;
-    
-    size_t numb_words = (size_t) size/align;
-
-    wordNode_t init = calloc(1, sizeof(struct wordNode_instance_t));
-    init -> copy_A = calloc(1, align);
-    init -> copy_B = calloc(1, align);
-    
-    
-    if(init == NULL) { printf("Could not allocate memory!\n"); return abort_alloc; }
-    if((init -> copy_A) == NULL) { printf("Could not allocate memory!\n"); return abort_alloc; }
-    if((init -> copy_B) == NULL) { printf("Could not allocate memory!\n"); return abort_alloc; }
-
-    init -> accessed = false;
-    init -> free = false;
-    init -> valid_a = true; // Setting default to that copy_A is valid
-    init -> writing = false;
-    init -> next_word = NULL; // Init to NULL, so it does not point to random place
-    init -> non_free_able = false; // This word is in the set of the allocated segments
-    init -> align_size = align;
-
-    wordNode_t tmp_head = init;
-    // If there size is a positive multiple of align
-    // that is bigger than 1, we will need to create more word nodes
-    for(size_t i = 0; i <(numb_words-1); i++)
-    {
-        wordNode_t new_word = calloc(1, sizeof(struct wordNode_instance_t));
-        if(new_word == NULL) { printf("Could not allocate memory!\n"); return abort_alloc; }
-        
-
-        tmp_head ->next_word = new_word;
-        tmp_head = new_word;
-
-        tmp_head -> copy_A = calloc(1, align); 
-        tmp_head -> copy_B = calloc(1, align);
-        
-        //Checking if allocation of memory was successfull
-        if((tmp_head -> copy_A) == NULL) { printf("Could not allocate memory!");return abort_alloc; }
-        if((tmp_head -> copy_B) == NULL) { printf("Could not allocate memory!");return abort_alloc; }
-
-        tmp_head -> accessed = false;
-        tmp_head -> free = false;
-        tmp_head -> valid_a = true; // Setting default to that copy_A is valid
-        tmp_head -> writing = false;
-        tmp_head -> next_word = NULL; // Init to NULL, so it does not point to random place
-        tmp_head -> non_free_able = false; // This word is in the set of the allocated segments
-        tmp_head -> align_size = align;
-
-    }
-
-    *target = init;
-
-    // Getting the last node of the shared memory and attaching this address to that
-    wordNode_t head = shared;
-    wordNode_t tmp;
-    
-    // Iterating over all nodes in the shared memory
-    // When accessing a nde where the next_word is NULL, we have the last node of the linked list!
-    while((head ->next_word) != NULL)
-    {
-        tmp = head -> next_word;
-        head = tmp;
-    }
-
-    // We now know that the head is the last node in the current linked list!
-    // And we can therefore attach our newly created segment to this shared memory!
-    head -> next_word = init;
-
-    return success_alloc;
-    
-}
-
-/** [thread-safe] Memory freeing in the given transaction.
- * @param shared Shared memory region associated with the transaction
- * @param tx     Transaction to use
- * @param target Address of the first byte of the previously allocated segment to deallocate
- * @return Whether the whole transaction can continue
-**/
-bool tm_free(shared_t unused(shared), tx_t unused(tx), void* unused(target)) {
-    // TODO: tm_free(shared_t, tx_t, void*)
-    
-    ((wordNode_t) target ) -> free = true;
-    return true;
-}
-
-
-int main()
-{
-
-    printf("Now we are running.....\n");
-    
-    // Input number of nodes:
-    size_t c = 5;
-
-    shared_t head = tm_create(4*c,4);
-
-    size_t align_size = tm_align(head);
-    size_t full_size = tm_size(head);
-
-
-    // Write from private source into shared memory
-    void* source_1 = malloc(sizeof(int)*3);
-    
-    
-    *((int*)source_1) = 1;
-    *((int*)(source_1)+1) = 10;
-    *((int*)(source_1)+2) = 100;
-    
-    // printf("%d\n",*(int*)(source_1) );
-    // printf("%d\n", *((int*)(source_1)+1) );
-    // printf("%d\n", *((int*)(source_1)+2) );
-
-    
-    tm_write(head, 222, source_1, 4*3, head);
-
-    ((wordNode_t) head)->accessed = false;
-    ((wordNode_t) head)->writing = false;
-    ((wordNode_t) head)->next_word->accessed = false;
-    ((wordNode_t) head)->next_word->writing = false;
-    ((wordNode_t) head)->next_word->next_word->accessed = false;
-    ((wordNode_t) head)->next_word->next_word->writing = false;
-    
-    void *private_memory = malloc(sizeof(int)*3);
-    // Init both private memory spots to 999, so we can see if they have updated!
-
-    *((int*)private_memory) = 999;
-    *((int*)(private_memory)+1) = 999;
-    *((int*)(private_memory)+2) = 999;
-    printf("\n----------------------\n\n");
-    printf("%d | %d | %d - initial values on private memory, should change\n\n", *(int*)private_memory, *( ((int*)(private_memory)) +1), *( ( (int*)(private_memory) ) + 2));
-    tm_read(head, 123, head, 4*3, private_memory);
-    printf("%d | %d | %d - if these values appear below, program works\n", 1, 10 ,100);
-    printf("%d | %d | %d\n", *(int*)private_memory, *( ( (int*)(private_memory) ) + 1), *( ( (int*)(private_memory) ) + 2));
-    
-    
-
-    
-    printf("Code executed with success!\n");
-
-
-    return 0;
-}
-
-
