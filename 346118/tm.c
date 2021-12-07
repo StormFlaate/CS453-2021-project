@@ -23,12 +23,18 @@
 **/
 
 // Requested feature: posix_memalign
+#define _GNU_SOURCE
 #define _POSIX_C_SOURCE   200809L
+#ifdef __STDC_NO_ATOMICS__
+    #error Current C11 compiler does not support atomic operations
+#endif
 
 // External headers
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
 
 // Internal headers
 #include "../include/tm.h"
@@ -42,12 +48,12 @@ static const tx_t read_write_tx = UINTPTR_MAX - 11;
 /**
  * @brief List of dynamically allocated segments.
  */
-struct segment_node {
-    struct segment_node* prev;
-    struct segment_node* next;
+struct wordNode_instance_t {
+    struct wordNode_instance_t* prev;
+    struct wordNode_instance_t* next;
     // uint8_t segment[] // segment of dynamic size
 };
-typedef struct segment_node* segment_list;
+typedef struct wordNode_instance_t* wordNode_t;
 
 /**
  * @brief Simple Shared Memory Region (a.k.a Transactional Memory).
@@ -55,7 +61,7 @@ typedef struct segment_node* segment_list;
 struct region {
     struct shared_lock_t lock; // Global (coarse-grained) lock
     void* start;        // Start of the shared memory region (i.e., of the non-deallocable memory segment)
-    segment_list allocs; // Shared memory segments dynamically allocated via tm_alloc within transactions
+    wordNode_t allocs; // Shared memory segments dynamically allocated via tm_alloc within transactions
     size_t size;        // Size of the non-deallocable memory segment (in bytes)
     size_t align;       // Size of a word in the shared memory region (in bytes)
 };
@@ -89,7 +95,7 @@ void tm_destroy(shared_t shared) {
     // is a struct region*.
     struct region* region = (struct region*) shared;
     while (region->allocs) { // Free allocated segments
-        segment_list tail = region->allocs->next;
+        wordNode_t tail = region->allocs->next;
         free(region->allocs);
         region->allocs = tail;
     }
@@ -165,12 +171,12 @@ bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* source, size
 alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     // We allocate the dynamic segment such that its words are correctly
     // aligned. Moreover, the alignment of the 'next' and 'prev' pointers must
-    // be satisfied. Thus, we use align on max(align, struct segment_node*).
+    // be satisfied. Thus, we use align on max(align, struct wordNode_t*).
     size_t align = ((struct region*) shared)->align;
-    align = align < sizeof(struct segment_node*) ? sizeof(void*) : align;
+    align = align < sizeof(struct wordNode_t*) ? sizeof(void*) : align;
 
-    struct segment_node* sn;
-    if (unlikely(posix_memalign((void**)&sn, align, sizeof(struct segment_node) + size) != 0)) // Allocation failed
+    struct wordNode_instance_t* sn;
+    if (unlikely(posix_memalign((void**)&sn, align, sizeof(struct ) + size) != 0)) // Allocation failed
         return nomem_alloc;
 
     // Insert in the linked list
@@ -179,14 +185,14 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     if (sn->next) sn->next->prev = sn;
     ((struct region*) shared)->allocs = sn;
 
-    void* segment = (void*) ((uintptr_t) sn + sizeof(struct segment_node));
+    void* segment = (void*) ((uintptr_t) sn + sizeof(struct wordNode_instance_t));
     memset(segment, 0, size);
     *target = segment;
     return success_alloc;
 }
 
 bool tm_free(shared_t shared, tx_t unused(tx), void* segment) {
-    struct segment_node* sn = (struct segment_node*) ((uintptr_t) segment - sizeof(struct segment_node));
+    struct wordNode_instance_t* sn = (struct wordNode_instance_t*) ((uintptr_t) segment - sizeof(struct wordNode_instance_t));
 
     // Remove from the linked list
     if (sn->prev) sn->prev->next = sn->next;
