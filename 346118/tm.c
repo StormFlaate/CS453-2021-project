@@ -98,7 +98,7 @@ shared_t tm_create(size_t size, size_t align) {
     }
     printf("Working...5\n");
 
-    printf("Adress of start: %p", region->start);
+    
     printf("Adress of copy_A: %p", ((wordNode_t)region->start)->copy_A);
     printf("Adress of copy_B: %p", ((wordNode_t)region->start)->copy_B);
     
